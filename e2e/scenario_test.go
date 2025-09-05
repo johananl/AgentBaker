@@ -91,6 +91,93 @@ func Test_Flatcar_ARM64(t *testing.T) {
 	})
 }
 
+func Test_Flatcar_AirGap(t *testing.T) {
+	RunScenario(t, &Scenario{
+		Description: "Tests that an airgapped Flatcar node can be properly bootstrapped",
+		Tags: Tags{
+			Airgap: true,
+		},
+		Config: Config{
+			Cluster: ClusterKubenetAirgap,
+			VHD:     config.VHDFlatcarGen2,
+			BootstrapConfigMutator: func(nbc *datamodel.NodeBootstrappingConfiguration) {
+				nbc.OutboundType = datamodel.OutboundTypeBlock
+				nbc.ContainerService.Properties.SecurityProfile = &datamodel.SecurityProfile{
+					PrivateEgress: &datamodel.PrivateEgress{
+						Enabled:                 true,
+						ContainerRegistryServer: fmt.Sprintf("%s.azurecr.io", config.PrivateACRName(config.Config.DefaultLocation)),
+					},
+				}
+			},
+			Validator: func(ctx context.Context, s *Scenario) {
+				ValidateDirectoryContent(ctx, s, "/run", []string{"outbound-check-skipped"})
+			},
+		},
+	})
+}
+
+func Test_Flatcar_ARM64AirGap(t *testing.T) {
+	RunScenario(t, &Scenario{
+		Description: "Tests that an airgapped Flatcar node on ARM64 can be properly bootstrapped",
+		Tags: Tags{
+			Airgap: true,
+		},
+		Config: Config{
+			Cluster: ClusterKubenetAirgap,
+			VHD:     config.VHDFlatcarGen2Arm64,
+			BootstrapConfigMutator: func(nbc *datamodel.NodeBootstrappingConfiguration) {
+				nbc.AgentPoolProfile.VMSize = "Standard_D2pds_V5"
+				nbc.IsARM64 = true
+
+				nbc.OutboundType = datamodel.OutboundTypeBlock
+				nbc.ContainerService.Properties.SecurityProfile = &datamodel.SecurityProfile{
+					PrivateEgress: &datamodel.PrivateEgress{
+						Enabled:                 true,
+						ContainerRegistryServer: fmt.Sprintf("%s.azurecr.io", config.PrivateACRName(config.Config.DefaultLocation)),
+					},
+				}
+			},
+			VMConfigMutator: func(vmss *armcompute.VirtualMachineScaleSet) {
+				vmss.SKU.Name = to.Ptr("Standard_D2pds_V5")
+			},
+			Validator: func(ctx context.Context, s *Scenario) {
+				ValidateDirectoryContent(ctx, s, "/run", []string{"outbound-check-skipped"})
+			},
+		},
+	})
+}
+
+func Test_Flatcar_AzureCNI(t *testing.T) {
+	RunScenario(t, &Scenario{
+		Description: "Flatcar scenario on a cluster configured with Azure CNI",
+		Config: Config{
+			Cluster: ClusterAzureNetwork,
+			VHD:     config.VHDFlatcarGen2,
+			BootstrapConfigMutator: func(nbc *datamodel.NodeBootstrappingConfiguration) {
+				nbc.ContainerService.Properties.OrchestratorProfile.KubernetesConfig.NetworkPlugin = string(armcontainerservice.NetworkPluginAzure)
+				nbc.AgentPoolProfile.KubernetesConfig.NetworkPlugin = string(armcontainerservice.NetworkPluginAzure)
+			},
+		},
+	})
+}
+
+func Test_Flatcar_ChronyRestarts(t *testing.T) {
+	RunScenario(t, &Scenario{
+		Description: "Tests that the chrony service restarts if it is killed",
+		Config: Config{
+			Cluster: ClusterKubenet,
+			VHD:     config.VHDFlatcarGen2,
+			BootstrapConfigMutator: func(nbc *datamodel.NodeBootstrappingConfiguration) {
+			},
+			Validator: func(ctx context.Context, s *Scenario) {
+				ValidateFileHasContent(ctx, s, "/etc/systemd/system/chronyd.service.d/10-chrony-restarts.conf", "Restart=always")
+				ValidateFileHasContent(ctx, s, "/etc/systemd/system/chronyd.service.d/10-chrony-restarts.conf", "RestartSec=5")
+				ServiceCanRestartValidator(ctx, s, "chronyd", 10)
+			},
+		},
+	})
+}
+
 func Test_AzureLinuxV2_AirGap(t *testing.T) {
 	RunScenario(t, &Scenario{
 		Description: "Tests that a node using a AzureLinuxV2 (CgroupV2) VHD can be properly bootstrapped",
@@ -122,6 +209,20 @@ func Test_AzureLinuxV2_SecureTLSBootstrapping_BootstrapToken_Fallback(t *testing
 		Config: Config{
 			Cluster: ClusterKubenet,
 			VHD:     config.VHDAzureLinuxV2Gen2,
+			BootstrapConfigMutator: func(nbc *datamodel.NodeBootstrappingConfiguration) {
+				// secure TLS bootstrapping is not yet enabled in e2e regions, thus this will test the bootstrap token fallback case
+				nbc.EnableSecureTLSBootstrapping = true
+			},
+		},
+	})
+}
+
+func Test_Flatcar_SecureTLSBootstrapping_BootstrapToken_Fallback(t *testing.T) {
+	RunScenario(t, &Scenario{
+		Description: "Tests that a node using a AzureLinuxV2 (CgroupV2) VHD can be properly bootstrapped even if secure TLS bootstrapping fails",
+		Config: Config{
+			Cluster: ClusterKubenet,
+			VHD:     config.VHDFlatcarGen2,
 			BootstrapConfigMutator: func(nbc *datamodel.NodeBootstrappingConfiguration) {
 				// secure TLS bootstrapping is not yet enabled in e2e regions, thus this will test the bootstrap token fallback case
 				nbc.EnableSecureTLSBootstrapping = true
